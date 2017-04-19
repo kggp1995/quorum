@@ -386,10 +386,10 @@ func (pm *ProtocolManager) handleRoleChange(roleC <-chan interface{}) {
 			}
 
 			if intRole == minterRole {
-				logCheckpoint(becameMinter, "")
+				log.EmitCheckpoint(log.BecameMinter)
 				pm.minter.start()
 			} else { // verifier
-				logCheckpoint(becameVerifier, "")
+				log.EmitCheckpoint(log.BecameVerifier)
 				pm.minter.stop()
 			}
 
@@ -649,10 +649,6 @@ func sleep(duration time.Duration) {
 	<-time.NewTimer(duration).C
 }
 
-func logCheckpoint(checkpointName string, iface interface{}) {
-	log.Info("RAFT-CHECKPOINT", "name", checkpointName, "data", iface)
-}
-
 func blockExtendsChain(block *types.Block, chain *core.BlockChain) bool {
 	return block.ParentHash() == chain.CurrentBlock().Hash()
 }
@@ -672,7 +668,7 @@ func (pm *ProtocolManager) applyNewChainHead(block *types.Block) {
 		}
 
 		for _, tx := range block.Transactions() {
-			logCheckpoint(txAccepted, tx.Hash().Hex())
+			log.EmitCheckpoint(log.TxAccepted, tx.Hash().Hex())
 		}
 
 		_, err := pm.blockchain.InsertChain([]*types.Block{block})
@@ -681,7 +677,7 @@ func (pm *ProtocolManager) applyNewChainHead(block *types.Block) {
 			panic(fmt.Sprintf("failed to extend chain: %s", err.Error()))
 		}
 
-		log.Info("Successfully extended chain", "hash", block.Hash())
+		log.EmitCheckpoint(log.BlockCreated, fmt.Sprintf("%x", block.Hash()))
 	}
 }
 
