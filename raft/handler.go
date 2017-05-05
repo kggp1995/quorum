@@ -666,7 +666,7 @@ func (pm *ProtocolManager) applyNewChainHead(block *types.Block) {
 		pm.eventMux.Post(InvalidRaftOrdering{headBlock: headBlock, invalidBlock: block})
 	} else {
 		if existingBlock := pm.blockchain.GetBlockByHash(block.Hash()); nil == existingBlock {
-			if err := pm.blockchain.Validator().ValidateBlock(block); err != nil {
+			if err := pm.blockchain.Validator().ValidateBody(block); err != nil {
 				panic(fmt.Sprintf("failed to validate block %x (%v)", block.Hash(), err))
 			}
 		}

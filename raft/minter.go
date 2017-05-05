@@ -29,27 +29,29 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 )
 
 // Current state information for building the next block
 type work struct {
-	config       *params.ChainConfig
-	publicState  *state.StateDB
-	privateState *state.StateDB
-	Block        *types.Block
-	header       *types.Header
+	config *params.ChainConfig
+	//publicState  *state.StateDB
+	//privateState *state.StateDB
+	state  *state.StateDB
+	Block  *types.Block
+	header *types.Header
 }
 
 type minter struct {
 	config           *params.ChainConfig
 	mu               sync.Mutex
 	mux              *event.TypeMux
-	eth              eth.Ethereum
+	eth              miner.Backend
 	chain            *core.BlockChain
 	chainDb          ethdb.Database
 	coinbase         common.Address
@@ -59,7 +61,7 @@ type minter struct {
 	speculativeChain *speculativeChain
 }
 
-func newMinter(config *params.ChainConfig, eth eth.Ethereum, blockTime time.Duration) *minter {
+func newMinter(config *params.ChainConfig, eth *RaftService, blockTime time.Duration) *minter {
 	minter := &minter{
 		config:           config,
 		eth:              eth,
@@ -78,7 +80,7 @@ func newMinter(config *params.ChainConfig, eth eth.Ethereum, blockTime time.Dura
 
 	minter.speculativeChain.clear(minter.chain.CurrentBlock())
 
-	go minter.eventLoop(events)
+	go minter.eventLoop(events.Chan())
 	go minter.mintingLoop()
 
 	return minter
@@ -131,8 +133,8 @@ func (minter *minter) updateSpeculativeChainPerInvalidOrdering(headBlock *types.
 	minter.speculativeChain.unwindFrom(invalidHash, headBlock)
 }
 
-func (minter *minter) eventLoop(events event.Subscription) {
-	for event := range events.Chan() {
+func (minter *minter) eventLoop(events <-chan *event.TypeMuxEvent) {
+	for event := range events {
 		switch ev := event.Data.(type) {
 		case core.ChainHeadEvent:
 			newHeadBlock := ev.Block
@@ -239,21 +241,26 @@ func (minter *minter) createWork() *work {
 		Time:       big.NewInt(tstamp),
 	}
 
-	publicState, privateState, err := minter.chain.StateAt(parent.Root())
+	// publicState, privateState, err := minter.chain.StateAt(parent.Root())
+	state, err := minter.chain.StateAt(parent.Root())
 	if err != nil {
 		panic(fmt.Sprint("failed to get parent state: ", err))
 	}
 
 	return &work{
-		config:       minter.config,
-		publicState:  publicState,
-		privateState: privateState,
-		header:       header,
+		config: minter.config,
+		//publicState:  publicState,
+		//privateState: privateState,
+		state:  state,
+		header: header,
 	}
 }
 
 func (minter *minter) getTransactions() *types.TransactionsByPriceAndNonce {
 	allAddrTxes, err := minter.eth.TxPool().Pending()
+	if err != nil { // TODO: handle
+		panic(err)
+	}
 	addrTxes := minter.speculativeChain.withoutProposedTxes(allAddrTxes)
 	return types.NewTransactionsByPriceAndNonce(addrTxes)
 }
@@ -280,7 +287,7 @@ func (minter *minter) mintNewBlock() {
 	work := minter.createWork()
 	transactions := minter.getTransactions()
 
-	committedTxes, publicReceipts, privateReceipts, logs := work.commitTransactions(transactions, minter.chain)
+	committedTxes, receipts, logs := work.commitTransactions(transactions, minter.chain)
 	txCount := len(committedTxes)
 
 	if txCount == 0 {
@@ -293,13 +300,13 @@ func (minter *minter) mintNewBlock() {
 	header := work.header
 
 	// commit state root after all state transitions.
-	core.AccumulateRewards(work.publicState, header, nil)
-	header.Root = work.publicState.IntermediateRoot(false)
+	ethash.AccumulateRewards(work.state, header, nil)
+	header.Root = work.state.IntermediateRoot(false)
 
 	// NOTE: < QuorumChain creates a signature here and puts it in header.Extra. >
 
-	allReceipts := append(publicReceipts, privateReceipts...)
-	header.Bloom = types.CreateBloom(allReceipts)
+	//allReceipts := append(publicReceipts, privateReceipts...)
+	header.Bloom = types.CreateBloom(receipts)
 
 	// update block hash since it is now available, but was not when the
 	// receipt/log of individual transactions were created:
@@ -308,16 +315,16 @@ func (minter *minter) mintNewBlock() {
 		l.BlockHash = headerHash
 	}
 
-	block := types.NewBlock(header, committedTxes, nil, publicReceipts)
+	block := types.NewBlock(header, committedTxes, nil, receipts)
 
 	log.Info("Generated next block", "block num", block.Number(), "num txes", txCount)
 
-	if _, err := work.publicState.Commit(); err != nil {
+	if _, err := work.state.Commit(false); err != nil {
 		panic(fmt.Sprint("error committing public state: ", err))
 	}
-	if _, privStateErr := work.privateState.Commit(); privStateErr != nil {
-		panic(fmt.Sprint("error committing private state: ", privStateErr))
-	}
+	//if _, privStateErr := work.privateState.Commit(); privStateErr != nil {
+	//	panic(fmt.Sprint("error committing private state: ", privStateErr))
+	//}
 
 	minter.speculativeChain.extend(block)
 
@@ -327,11 +334,12 @@ func (minter *minter) mintNewBlock() {
 	log.Info("🔨  Mined block", "number", block.Number(), "hash", block.Hash().Bytes()[:4], "elapsed", elapsed)
 }
 
-func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc *core.BlockChain) (types.Transactions, types.Receipts, types.Receipts, []*types.Log) {
+func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc *core.BlockChain) (types.Transactions, types.Receipts, []*types.Log) {
 	var logs []*types.Log
 	var committedTxes types.Transactions
-	var publicReceipts types.Receipts
-	var privateReceipts types.Receipts
+	//var publicReceipts types.Receipts
+	//var privateReceipts types.Receipts
+	var receipts types.Receipts
 
 	gp := new(core.GasPool).AddGas(env.header.GasLimit)
 	txCount := 0
@@ -342,9 +350,9 @@ func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc 
 			break
 		}
 
-		env.publicState.StartRecord(tx.Hash(), common.Hash{}, 0)
+		env.state.StartRecord(tx.Hash(), common.Hash{}, 0)
 
-		publicReceipt, privateReceipt, err := env.commitTransaction(tx, bc, gp)
+		receipt, err := env.commitTransaction(tx, bc, gp)
 		switch {
 		case err != nil:
 			log.Info("TX failed, will be removed", "hash", tx.Hash().Bytes()[:4], "err", err)
@@ -353,32 +361,37 @@ func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc 
 			txCount++
 			committedTxes = append(committedTxes, tx)
 
-			logs = append(logs, publicReceipt.Logs...)
-			publicReceipts = append(publicReceipts, publicReceipt)
+			logs = append(logs, receipt.Logs...)
+			receipts = append(receipts, receipt)
 
-			if privateReceipt != nil {
-				logs = append(logs, privateReceipt.Logs...)
-				privateReceipts = append(privateReceipts, privateReceipt)
-			}
+			//logs = append(logs, publicReceipt.Logs...)
+			//publicReceipts = append(publicReceipts, publicReceipt)
+			//
+			//if privateReceipt != nil {
+			//	logs = append(logs, privateReceipt.Logs...)
+			//	privateReceipts = append(privateReceipts, privateReceipt)
+			//}
 
 			txes.Shift()
 		}
 	}
 
-	return committedTxes, publicReceipts, privateReceipts, logs
+	return committedTxes, receipts, logs
 }
 
-func (env *work) commitTransaction(tx *types.Transaction, bc *core.BlockChain, gp *core.GasPool) (*types.Receipt, *types.Receipt, error) {
-	publicSnapshot := env.publicState.Snapshot()
-	privateSnapshot := env.privateState.Snapshot()
+func (env *work) commitTransaction(tx *types.Transaction, bc *core.BlockChain, gp *core.GasPool) (*types.Receipt, error) {
+	publicSnapshot := env.state.Snapshot()
+	//privateSnapshot := env.privateState.Snapshot()
 
-	publicReceipt, privateReceipt, _, err := core.ApplyTransaction(env.config, bc, gp, env.publicState, env.privateState, env.header, tx, env.header.GasUsed, env.config.VmConfig)
+	var author *common.Address
+	var vmConf vm.Config
+	receipt, _, err := core.ApplyTransaction(env.config, bc, author, gp, env.state, env.header, tx, env.header.GasUsed, vmConf)
 	if err != nil {
-		env.publicState.RevertToSnapshot(publicSnapshot)
-		env.privateState.RevertToSnapshot(privateSnapshot)
+		env.state.RevertToSnapshot(publicSnapshot)
+		//env.privateState.RevertToSnapshot(privateSnapshot)
 
-		return nil, nil, err
+		return nil, err
 	}
 
-	return publicReceipt, privateReceipt, nil
+	return receipt, nil
 }
