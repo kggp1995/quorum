@@ -110,6 +110,9 @@ type BlockChain struct {
 	vmConfig  vm.Config
 
 	badBlocks *lru.Cache // Bad block cache
+
+	privateStateCache state.Database // Private state database to reuse between imports (contains state cache)
+	chainEvents       chan interface{}
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -166,6 +169,7 @@ func NewBlockChain(chainDb ethdb.Database, config *params.ChainConfig, engine co
 	}
 	// Take ownership of this particular state
 	go bc.update()
+	go bc.chainEventsLoop()
 	return bc, nil
 }
 
@@ -196,6 +200,14 @@ func (bc *BlockChain) loadLastState() error {
 		log.Warn("Head state missing, resetting chain", "number", currentBlock.Number(), "hash", currentBlock.Hash())
 		return bc.Reset()
 	}
+
+	// Quorum
+	if _, err := state.New(GetPrivateStateRoot(bc.chainDb, currentBlock.Root()), bc.privateStateCache); err != nil {
+		log.Warn("Head private state missing, resetting chain", "number", currentBlock.Number(), "hash", currentBlock.Hash())
+		return bc.Reset()
+	}
+	// /Quorum
+
 	// Everything seems to be fine, set as the head block
 	bc.currentBlock = currentBlock
 
@@ -215,6 +227,13 @@ func (bc *BlockChain) loadLastState() error {
 			bc.currentFastBlock = block
 		}
 	}
+
+	// Initialize a statedb cache to ensure singleton account bloom filter generation
+	//self.privateStateCache, err = state.New(GetPrivateStateRoot(self.chainDb, self.currentBlock.Hash()), self.chainDb)
+	//if err != nil {
+	//	return err
+	//}
+	//self.privateStateCache.GetAccount(common.Address{})
 
 	// Issue a status log for the user
 	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
@@ -306,7 +325,11 @@ func (bc *BlockChain) GasLimit() *big.Int {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
-	return bc.currentBlock.GasLimit()
+	if params.IsQuorum {
+		return common.Big0
+	} else {
+		return bc.currentBlock.GasLimit()
+	}
 }
 
 // LastBlockHash return the hash of the HEAD block.
@@ -373,13 +396,22 @@ func (bc *BlockChain) Processor() Processor {
 }
 
 // State returns a new mutable state based on the current HEAD block.
-func (bc *BlockChain) State() (*state.StateDB, error) {
+func (bc *BlockChain) State() (*state.StateDB, *state.StateDB, error) {
 	return bc.StateAt(bc.CurrentBlock().Root())
 }
 
 // StateAt returns a new mutable state based on a particular point in time.
-func (bc *BlockChain) StateAt(root common.Hash) (*state.StateDB, error) {
-	return state.New(root, bc.stateCache)
+func (bc *BlockChain) StateAt(root common.Hash) (*state.StateDB, *state.StateDB, error) {
+	publicStateDb, publicStateDbErr := state.New(root, bc.stateCache)
+	if publicStateDbErr != nil {
+		return nil, nil, publicStateDbErr
+	}
+	privateStateDb, privateStateDbErr := state.New(GetPrivateStateRoot(bc.chainDb, root), bc.privateStateCache)
+	if privateStateDbErr != nil {
+		return nil, nil, privateStateDbErr
+	}
+
+	return publicStateDb, privateStateDb, nil
 }
 
 // Reset purges the entire blockchain, restoring it to its genesis state.
@@ -954,12 +986,22 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		} else {
 			parent = chain[i-1]
 		}
+
+		// Quorum
+		privateStateRoot := GetPrivateStateRoot(bc.chainDb, parent.Root())
+		privateState, err := state.New(privateStateRoot, bc.privateStateCache)
+		if err != nil {
+			return i, err
+		}
+		// /Quorum
+
 		state, err := state.New(parent.Root(), bc.stateCache)
 		if err != nil {
 			return i, err
 		}
+
 		// Process block using the parent state as reference point.
-		receipts, logs, usedGas, err := bc.processor.Process(block, state, bc.vmConfig)
+		receipts, privateReceipts, logs, usedGas, err := bc.processor.Process(block, state, privateState, bc.vmConfig)
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
 			return i, err
@@ -974,11 +1016,15 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		if _, err = state.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
 			return i, err
 		}
+		if _, err = privateState.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
+			return i, err
+		}
 
 		// coalesce logs for later processing
 		coalescedLogs = append(coalescedLogs, logs...)
 
-		if err = WriteBlockReceipts(bc.chainDb, block.Hash(), block.NumberU64(), receipts); err != nil {
+		allReceipts := append(receipts, privateReceipts...)
+		if err = WriteBlockReceipts(bc.chainDb, block.Hash(), block.NumberU64(), allReceipts); err != nil {
 			return i, err
 		}
 
@@ -1001,7 +1047,10 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 				return i, err
 			}
 			// Write map map bloom filters
-			if err := WriteMipmapBloom(bc.chainDb, block.NumberU64(), receipts); err != nil {
+			if err := WriteMipmapBloom(bc.chainDb, block.NumberU64(), allReceipts); err != nil {
+				return i, err
+			}
+			if err := WritePrivateBlockBloom(bc.chainDb, block.NumberU64(), privateReceipts); err != nil {
 				return i, err
 			}
 			// Write hash preimages
@@ -1015,13 +1064,17 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 			blockInsertTimer.UpdateSince(bstart)
 			events = append(events, ChainSideEvent{block})
 		}
-
-		log.EmitCheckpoint(log.BlockCreated, fmt.Sprintf("%x", block.Hash()))
 		stats.processed++
 		stats.usedGas += usedGas.Uint64()
 		stats.report(chain, i)
 	}
-	go bc.postChainEvents(events, coalescedLogs)
+
+	//
+	// This should remain *synchronous* so that we can control ordering of
+	// ChainHeadEvents. This is important for supporting low latency
+	// (non-Proof-of-Work) consensus mechanisms.
+	//
+	bc.postChainEvents(events, coalescedLogs)
 
 	return 0, nil
 }
@@ -1201,19 +1254,19 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 // postChainEvents iterates over the events generated by a chain insertion and
 // posts them into the event mux.
 func (bc *BlockChain) postChainEvents(events []interface{}, logs []*types.Log) {
+	// Requires mu:
+	currBlockHash := bc.currentBlock.Hash()
+
 	// post event logs for further processing
-	bc.eventMux.Post(logs)
+	bc.chainEvents <- logs
 	for _, event := range events {
 		if event, ok := event.(ChainEvent); ok {
-			// We need some control over the mining operation. Acquiring locks and waiting
-			// for the miner to create new block takes too long and in most cases isn't
-			// even necessary.
-			if bc.LastBlockHash() == event.Hash {
-				bc.eventMux.Post(ChainHeadEvent{event.Block})
+			if currBlockHash == event.Hash {
+				bc.chainEvents <- ChainHeadEvent{event.Block}
 			}
 		}
 		// Fire the insertion events individually too
-		bc.eventMux.Post(event)
+		bc.chainEvents <- event
 	}
 }
 
@@ -1381,3 +1434,14 @@ func (bc *BlockChain) Config() *params.ChainConfig { return bc.config }
 
 // Engine retrieves the blockchain's consensus engine.
 func (bc *BlockChain) Engine() consensus.Engine { return bc.engine }
+
+// When we insert into the blockchain we must publish logs, chain head events,
+// and contract events. `eventMux.Post` cannot be called while we are holding
+// `mu`, and we need to maintain a correct ordering of these events for
+// correctness, so they are published into the `chainEvents` channel, and
+// a goroutine running this loop performs the `Post`.
+func (self *BlockChain) chainEventsLoop() {
+	for e := range self.chainEvents {
+		self.eventMux.Post(e)
+	}
+}

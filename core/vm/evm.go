@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -98,18 +100,29 @@ type EVM struct {
 	// abort is used to abort the EVM calling operations
 	// NOTE: must be set atomically
 	abort int32
+
+	// Quorum additions:
+	privateState      StateDB
+	states            [1027]*state.StateDB
+	currentStateDepth uint
+	readOnly          bool
+	readOnlyDepth     uint
 }
 
-// NewEVM retutrns a new EVM evmironment. The returned EVM is not thread safe
+// NewEVM returns a new EVM environment. The returned EVM is not thread safe
 // and should only ever be used *once*.
-func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+func NewEVM(ctx Context, statedb, privateState StateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
 	evm := &EVM{
 		Context:     ctx,
 		StateDB:     statedb,
 		vmConfig:    vmConfig,
 		chainConfig: chainConfig,
 		chainRules:  chainConfig.Rules(ctx.BlockNumber),
+
+		privateState: privateState,
 	}
+
+	evm.Push(privateState)
 
 	evm.interpreter = NewInterpreter(evm, vmConfig)
 	return evm
@@ -129,6 +142,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		return nil, gas, nil
 	}
 
+	println("in EVM.Call")
+	evm.Push(getDualState(evm, addr))
+	defer func() { evm.Pop() }()
+
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if evm.depth > int(params.CallCreateDepth) {
@@ -138,16 +155,27 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		return nil, gas, ErrInsufficientBalance
 	}
 
+	var createAccount bool
+	if addr == (common.Address{}) {
+		println("in EVM.Call: createAddressAndIncrementNonce")
+		addr = createAddressAndIncrementNonce(evm, caller)
+		createAccount = true
+	}
+
 	var (
 		to       = AccountRef(addr)
 		snapshot = evm.StateDB.Snapshot()
 	)
-	if !evm.StateDB.Exist(addr) {
-		if PrecompiledContracts[addr] == nil && evm.ChainConfig().IsEIP158(evm.BlockNumber) && value.Sign() == 0 {
-			return nil, gas, nil
-		}
-
+	if createAccount {
 		evm.StateDB.CreateAccount(addr)
+	} else {
+		if !evm.StateDB.Exist(addr) {
+			if PrecompiledContracts[addr] == nil && evm.ChainConfig().IsEIP158(evm.BlockNumber) && value.Sign() == 0 {
+				return nil, gas, nil
+			}
+
+			evm.StateDB.CreateAccount(addr)
+		}
 	}
 	evm.Transfer(evm.StateDB, caller.Address(), to.Address(), value)
 
@@ -178,12 +206,17 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		return nil, gas, nil
 	}
 
+	evm.Push(getDualState(evm, addr))
+	defer func() { evm.Pop() }()
+
+	// TODO(joel) do we need to do the createAccount / createAccountAndIncrementNonce dance from the old exec()?
+
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-	if !evm.CanTransfer(evm.StateDB, caller.Address(), value) {
+	if !evm.CanTransfer(caller.Address(), value) {
 		return nil, gas, ErrInsufficientBalance
 	}
 
@@ -215,6 +248,9 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
+
+	evm.Push(getDualState(evm, addr))
+	defer func() { evm.Pop() }()
 
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
@@ -251,16 +287,13 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.I
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, common.Address{}, gas, ErrDepth
 	}
-	if !evm.CanTransfer(evm.StateDB, caller.Address(), value) {
+	if !evm.CanTransfer(caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 
-	// Create a new account on the state
-	nonce := evm.StateDB.GetNonce(caller.Address())
-	evm.StateDB.SetNonce(caller.Address(), nonce+1)
+	contractAddr = createAddressAndIncrementNonce(evm, caller)
 
 	snapshot := evm.StateDB.Snapshot()
-	contractAddr = crypto.CreateAddress(caller.Address(), nonce)
 	evm.StateDB.CreateAccount(contractAddr)
 	if evm.ChainConfig().IsEIP158(evm.BlockNumber) {
 		evm.StateDB.SetNonce(contractAddr, 1)
@@ -312,3 +345,113 @@ func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
 
 // Interpreter returns the EVM interpreter
 func (evm *EVM) Interpreter() *Interpreter { return evm.interpreter }
+
+// TODO(joel): just switch to EVM?
+type DualStateEnv interface {
+	PublicState() StateDB
+	PrivateState() StateDB
+
+	Push(StateDB)
+	Pop()
+}
+
+/*
+func stateSwitch(env vm.Environment, addr common.Address) {
+	if env, ok := env.(DualStateEnv); ok {
+		var state *state.StateDB
+		if env.PrivateState().Exist(addr) {
+			state = env.PrivateState()
+		} else if env.PublicState().Exist(addr) {
+			state = env.PublicState()
+		}
+		env.Push(state)
+		defer func() { env.Pop() }()
+	}
+}
+*/
+
+func getDualState(env DualStateEnv, addr common.Address) StateDB {
+	// priv: (a) -> (b)  (private)
+	// pub:   a  -> [b]  (private -> public)
+	// priv: (a) ->  b   (public)
+	var state StateDB
+	println("public state:", addr.String(), env.PublicState(), env.PublicState().GetCode(addr))
+	println("private state:", addr.String(), env.PrivateState(), env.PrivateState().GetCode(addr))
+	if env.PrivateState().Exist(addr) {
+		println("getDualState: private")
+		state = env.PrivateState()
+	} else if env.PublicState().Exist(addr) {
+		println("getDualState: public")
+		state = env.PublicState()
+	}
+
+	return state
+}
+
+// createAddressAndIncrementNonce returns an address based on the caller address and nonce.
+//
+// It also gets the right state in case of a dual state environment. If a sender
+// is a transaction (depth == 0) use the public state to derive the address
+// and increment the nonce of the public state. If the sender is a contract
+// (depth > 0) use the private state to derive the nonce and increment the
+// nonce on the private state only.
+//
+// If the transaction went to a public contract the private and public state
+// are the same.
+func createAddressAndIncrementNonce(env *EVM, caller ContractRef) common.Address {
+	db := env.Db()
+	// check for a dual state in case of quorum.
+	if env.Depth() > 0 {
+		db = env.PrivateState()
+	} else {
+		db = env.PublicState()
+	}
+	// Increment the callers nonce on the state based on the current depth
+	nonce := db.GetNonce(caller.Address())
+	db.SetNonce(caller.Address(), nonce+1)
+
+	return crypto.CreateAddress(caller.Address(), nonce)
+}
+
+func (env *EVM) PublicState() StateDB  { return env.StateDB }
+func (env *EVM) PrivateState() StateDB { return env.privateState }
+func (env *EVM) Push(statedb StateDB) {
+	if env.privateState != statedb {
+		env.readOnly = true
+		env.readOnlyDepth = env.currentStateDepth
+	}
+
+	if castedStateDb, ok := statedb.(*state.StateDB); ok {
+		env.states[env.currentStateDepth] = castedStateDb
+		env.currentStateDepth++
+	}
+}
+func (env *EVM) Pop() {
+	env.currentStateDepth--
+	if env.readOnly && env.currentStateDepth == env.readOnlyDepth {
+		env.readOnly = false
+	}
+}
+func (env *EVM) currentState() *state.StateDB { return env.states[env.currentStateDepth-1] }
+func (env *EVM) Db() StateDB                  { return env.currentState() }
+func (env *EVM) Depth() int                   { return env.depth }
+func (env *EVM) SetDepth(i int)               { env.depth = i }
+
+func (self *EVM) AddLog(log *types.Log) {
+	self.currentState().AddLog(log)
+}
+func (self *EVM) CanTransfer(from common.Address, balance *big.Int) bool {
+	return self.currentState().GetBalance(from).Cmp(balance) >= 0
+}
+
+//func (self *EVM) SnapshotDatabase() int {
+//	return self.currentState().Snapshot()
+//}
+
+// We only need to revert the current state because when we call from private
+// public state it's read only, there wouldn't be anything to reset.
+// (A)->(B)->C->(B): A failure in (B) wouldn't need to reset C, as C was flagged
+// read only.
+func (self *EVM) RevertToSnapshot(snapshot int) {
+	self.currentState().RevertToSnapshot(snapshot)
+}

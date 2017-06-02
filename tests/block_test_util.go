@@ -119,7 +119,8 @@ func (t *BlockTest) Run(config *params.ChainConfig) error {
 	if common.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB, err := chain.State()
+
+	newDB, _, err := chain.State()
 	if err != nil {
 		return err
 	}
