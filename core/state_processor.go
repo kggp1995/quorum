@@ -132,7 +132,6 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
 	var privateReceipt *types.Receipt
-	println("ApplyTransaction", "tx.IsPrivate()", tx.IsPrivate())
 	if tx.IsPrivate() {
 		privateRoot := privateState.IntermediateRoot(config.IsEIP158(header.Number))
 		privateReceipt = types.NewReceipt(privateRoot.Bytes(), usedGas)
