@@ -228,13 +228,6 @@ func (bc *BlockChain) loadLastState() error {
 		}
 	}
 
-	// Initialize a statedb cache to ensure singleton account bloom filter generation
-	//self.privateStateCache, err = state.New(GetPrivateStateRoot(self.chainDb, self.currentBlock.Hash()), self.chainDb)
-	//if err != nil {
-	//	return err
-	//}
-	//self.privateStateCache.GetAccount(common.Address{})
-
 	// Issue a status log for the user
 	headerTd := bc.GetTd(currentHeader.Hash(), currentHeader.Number.Uint64())
 	blockTd := bc.GetTd(bc.currentBlock.Hash(), bc.currentBlock.NumberU64())
