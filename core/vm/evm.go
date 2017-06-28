@@ -346,32 +346,7 @@ func (evm *EVM) ChainConfig() *params.ChainConfig { return evm.chainConfig }
 // Interpreter returns the EVM interpreter
 func (evm *EVM) Interpreter() *Interpreter { return evm.interpreter }
 
-// TODO(joel): just switch to EVM?
-type DualStateEnv interface {
-	PublicState() StateDB
-	PrivateState() StateDB
-	Db() StateDB
-
-	Push(StateDB)
-	Pop()
-}
-
-/*
-func stateSwitch(env vm.Environment, addr common.Address) {
-	if env, ok := env.(DualStateEnv); ok {
-		var state *state.StateDB
-		if env.PrivateState().Exist(addr) {
-			state = env.PrivateState()
-		} else if env.PublicState().Exist(addr) {
-			state = env.PublicState()
-		}
-		env.Push(state)
-		defer func() { env.Pop() }()
-	}
-}
-*/
-
-func getDualState(env DualStateEnv, addr common.Address) StateDB {
+func getDualState(env *EVM, addr common.Address) StateDB {
 	// priv: (a) -> (b)  (private)
 	// pub:   a  -> [b]  (private -> public)
 	// priv: (a) ->  b   (public)
