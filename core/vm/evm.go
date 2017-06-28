@@ -70,6 +70,9 @@ type Context struct {
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
 }
 
+type PublicState StateDB
+type PrivateState StateDB
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -102,8 +105,8 @@ type EVM struct {
 	abort int32
 
 	// Quorum additions:
-	publicState       StateDB
-	privateState      StateDB
+	publicState       PublicState
+	privateState      PrivateState
 	states            [1027]*state.StateDB
 	currentStateDepth uint
 	readOnly          bool
@@ -385,8 +388,8 @@ func createAddressAndIncrementNonce(env *EVM, caller ContractRef) common.Address
 	return crypto.CreateAddress(caller.Address(), nonce)
 }
 
-func (env *EVM) PublicState() StateDB  { return env.publicState }
-func (env *EVM) PrivateState() StateDB { return env.privateState }
+func (env *EVM) PublicState() PublicState   { return env.publicState }
+func (env *EVM) PrivateState() PrivateState { return env.privateState }
 func (env *EVM) Push(statedb StateDB) {
 	if env.privateState != statedb {
 		env.readOnly = true
