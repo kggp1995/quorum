@@ -45,13 +45,6 @@ var (
 	blockHashPrefix     = []byte("H")   // blockHashPrefix + hash -> num (uint64 big endian)
 	bodyPrefix          = []byte("b")   // bodyPrefix + num (uint64 big endian) + hash -> block body
 	blockReceiptsPrefix = []byte("r")   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
-	lookupPrefix        = []byte("l")   // lookupPrefix + hash -> transaction/receipt lookup metadata
-	preimagePrefix      = "secure-key-" // preimagePrefix + hash -> preimage
-
-	privateRootPrefix          = []byte("P")
-	privateblockReceiptsPrefix = []byte("Pr") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
-	privateReceiptPrefix       = []byte("Prs")
-	privateBloomPrefix         = []byte("Pb")
 
 	mipmapPre    = []byte("mipmap-log-bloom-")
 	MIPMapLevels = []uint64{1000000, 500000, 100000, 50000, 1000}
@@ -68,6 +61,14 @@ var (
 
 	preimageCounter    = metrics.NewCounter("db/preimage/total")
 	preimageHitCounter = metrics.NewCounter("db/preimage/hits")
+
+	lookupPrefix        = []byte("l")   // lookupPrefix + hash -> transaction/receipt lookup metadata
+	preimagePrefix      = "secure-key-" // preimagePrefix + hash -> preimage
+
+	privateRootPrefix          = []byte("P")
+	privateblockReceiptsPrefix = []byte("Pr") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	privateReceiptPrefix       = []byte("Prs")
+	privateBloomPrefix         = []byte("Pb")
 )
 
 // txLookupEntry is a positional metadata to help looking up the data content of
