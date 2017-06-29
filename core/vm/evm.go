@@ -22,7 +22,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -353,7 +352,8 @@ func getDualState(env *EVM, addr common.Address) StateDB {
 	// priv: (a) -> (b)  (private)
 	// pub:   a  -> [b]  (private -> public)
 	// priv: (a) ->  b   (public)
-	state := env.Db()
+	state := env.StateDB
+
 	if env.PrivateState().Exist(addr) {
 		state = env.PrivateState()
 	} else if env.PublicState().Exist(addr) {
@@ -411,21 +411,11 @@ func (env *EVM) Pop() {
 	env.StateDB = env.states[env.currentStateDepth-1]
 }
 
-//func (env *EVM) currentState() *state.StateDB { return env.StateDB }
-func (env *EVM) Db() StateDB    { return env.StateDB }
-func (env *EVM) Depth() int     { return env.depth }
-func (env *EVM) SetDepth(i int) { env.depth = i }
+func (env *EVM) Depth() int { return env.depth }
 
-func (self *EVM) AddLog(log *types.Log) {
-	self.StateDB.AddLog(log)
-}
 func (self *EVM) CanTransfer(from common.Address, balance *big.Int) bool {
 	return self.StateDB.GetBalance(from).Cmp(balance) >= 0
 }
-
-//func (self *EVM) SnapshotDatabase() int {
-//	return self.currentState().Snapshot()
-//}
 
 // We only need to revert the current state because when we call from private
 // public state it's read only, there wouldn't be anything to reset.

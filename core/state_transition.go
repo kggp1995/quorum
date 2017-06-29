@@ -114,7 +114,7 @@ func IntrinsicGas(data []byte, contractCreation, homestead bool) *big.Int {
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
-	st := &StateTransition{
+	return &StateTransition{
 		gp:         gp,
 		evm:        evm,
 		msg:        msg,
@@ -122,11 +122,8 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		initialGas: new(big.Int),
 		value:      msg.Value(),
 		data:       msg.Data(),
-		state:      evm.StateDB,
+		state:      evm.PublicState(),
 	}
-
-	st.state = evm.PublicState()
-	return st
 }
 
 // ApplyMessage computes the new state by applying the given message
