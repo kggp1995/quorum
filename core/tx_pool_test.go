@@ -300,7 +300,7 @@ func TestTransactionChainFork(t *testing.T) {
 	resetState := func() {
 		db, _ := ethdb.NewMemDatabase()
 		statedb, _ := state.New(common.Hash{}, state.NewDatabase(db))
-		pool.currentState = func() (*state.StateDB, error) { return statedb, nil }
+		pool.currentState = func() (*state.StateDB, *state.StateDB, error) { return statedb, statedb, nil }
 		currentState, _, _ := pool.currentState()
 		currentState.AddBalance(addr, big.NewInt(100000000000000))
 		pool.resetState()
@@ -661,12 +661,12 @@ func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	config.NoLocals = nolocals
 	config.GlobalQueue = config.AccountQueue*3 - 1 // reduce the queue limits to shorten test time (-1 to make it non divisible)
 
-	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, *statedb.StateDB, error) { return statedb, statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
+	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, *state.StateDB, error) { return statedb, statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
 	defer pool.Stop()
 	pool.resetState()
 
 	// Create a number of test accounts and fund them (last one will be the local)
-	state, _ := pool.currentState()
+	state, _, _ := pool.currentState()
 
 	keys := make([]*ecdsa.PrivateKey, 5)
 	for i := 0; i < len(keys); i++ {
@@ -752,7 +752,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	config.Lifetime = 250 * time.Millisecond
 	config.NoLocals = nolocals
 
-	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, error) { return statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
+	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, *state.StateDB, error) { return statedb, statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
 	defer pool.Stop()
 	pool.resetState()
 
@@ -940,12 +940,12 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 	config.AccountQueue = 2
 	config.GlobalSlots = 8
 
-	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, error) { return statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
+	pool := NewTxPool(config, params.TestChainConfig, new(event.TypeMux), func() (*state.StateDB, *state.StateDB, error) { return statedb, statedb, nil }, func() *big.Int { return big.NewInt(1000000) })
 	defer pool.Stop()
 	pool.resetState()
 
 	// Create a number of test accounts and fund them
-	state, _ := pool.currentState()
+	state, _, _ := pool.currentState()
 
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)

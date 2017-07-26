@@ -17,8 +17,6 @@
 package tests
 
 import (
-	"bytes"
-	"fmt"
 	"math/big"
 	"os"
 
@@ -29,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -45,39 +42,6 @@ func init() {
 		ForceJit = true
 		EnableJit = true
 	}
-}
-
-func checkLogs(tlog []Log, logs []*types.Log) error {
-
-	if len(tlog) != len(logs) {
-		return fmt.Errorf("log length mismatch. Expected %d, got %d", len(tlog), len(logs))
-	} else {
-		for i, log := range tlog {
-			if common.HexToAddress(log.AddressF) != logs[i].Address {
-				return fmt.Errorf("log address expected %v got %x", log.AddressF, logs[i].Address)
-			}
-
-			if !bytes.Equal(logs[i].Data, common.FromHex(log.DataF)) {
-				return fmt.Errorf("log data expected %v got %x", log.DataF, logs[i].Data)
-			}
-
-			if len(log.TopicsF) != len(logs[i].Topics) {
-				return fmt.Errorf("log topics length expected %d got %d", len(log.TopicsF), logs[i].Topics)
-			} else {
-				for j, topic := range log.TopicsF {
-					if common.HexToHash(topic) != logs[i].Topics[j] {
-						return fmt.Errorf("log topic[%d] expected %v got %x", j, topic, logs[i].Topics[j])
-					}
-				}
-			}
-			genBloom := math.PaddedBigBytes(types.LogsBloom([]*types.Log{logs[i]}), 256)
-
-			if !bytes.Equal(genBloom, common.Hex2Bytes(log.BloomF)) {
-				return fmt.Errorf("bloom mismatch")
-			}
-		}
-	}
-	return nil
 }
 
 type Account struct {
@@ -103,14 +67,6 @@ func (self Log) Topics() [][]byte {
 		t[i] = common.Hex2Bytes(topic)
 	}
 	return t
-}
-
-func makePreState(db ethdb.Database, accounts map[string]Account) *state.StateDB {
-	statedb, _ := state.New(common.Hash{}, db)
-	for addr, account := range accounts {
-		insertAccount(statedb, addr, account)
-	}
-	return statedb
 }
 
 func insertAccount(state *state.StateDB, saddr string, account Account) {

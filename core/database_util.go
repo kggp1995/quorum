@@ -39,12 +39,12 @@ var (
 	headBlockKey  = []byte("LastBlock")
 	headFastKey   = []byte("LastFast")
 
-	headerPrefix        = []byte("h")   // headerPrefix + num (uint64 big endian) + hash -> header
-	tdSuffix            = []byte("t")   // headerPrefix + num (uint64 big endian) + hash + tdSuffix -> td
-	numSuffix           = []byte("n")   // headerPrefix + num (uint64 big endian) + numSuffix -> hash
-	blockHashPrefix     = []byte("H")   // blockHashPrefix + hash -> num (uint64 big endian)
-	bodyPrefix          = []byte("b")   // bodyPrefix + num (uint64 big endian) + hash -> block body
-	blockReceiptsPrefix = []byte("r")   // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
+	headerPrefix        = []byte("h") // headerPrefix + num (uint64 big endian) + hash -> header
+	tdSuffix            = []byte("t") // headerPrefix + num (uint64 big endian) + hash + tdSuffix -> td
+	numSuffix           = []byte("n") // headerPrefix + num (uint64 big endian) + numSuffix -> hash
+	blockHashPrefix     = []byte("H") // blockHashPrefix + hash -> num (uint64 big endian)
+	bodyPrefix          = []byte("b") // bodyPrefix + num (uint64 big endian) + hash -> block body
+	blockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
 	mipmapPre    = []byte("mipmap-log-bloom-")
 	MIPMapLevels = []uint64{1000000, 500000, 100000, 50000, 1000}
@@ -62,8 +62,8 @@ var (
 	preimageCounter    = metrics.NewCounter("db/preimage/total")
 	preimageHitCounter = metrics.NewCounter("db/preimage/hits")
 
-	lookupPrefix        = []byte("l")   // lookupPrefix + hash -> transaction/receipt lookup metadata
-	preimagePrefix      = "secure-key-" // preimagePrefix + hash -> preimage
+	lookupPrefix   = []byte("l")   // lookupPrefix + hash -> transaction/receipt lookup metadata
+	preimagePrefix = "secure-key-" // preimagePrefix + hash -> preimage
 
 	privateRootPrefix          = []byte("P")
 	privateblockReceiptsPrefix = []byte("Pr") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
@@ -646,10 +646,12 @@ func FindCommonAncestor(db ethdb.Database, a, b *types.Header) *types.Header {
 
 func GetPrivateStateRoot(db ethdb.Database, blockRoot common.Hash) common.Hash {
 	root, _ := db.Get(append(privateRootPrefix, blockRoot[:]...))
+	println("GetPrivateStateRoot", "root", root, "blockRoot", fmt.Sprintf("%x", blockRoot), "privateRootPrefix", privateRootPrefix)
 	return common.BytesToHash(root)
 }
 
 func WritePrivateStateRoot(db ethdb.Database, blockRoot, root common.Hash) error {
+	println("WritePrivateStateRoot", "root", fmt.Sprintf("%x", root), "blockRoot", fmt.Sprintf("%x", blockRoot), "privateRootPrefix", privateRootPrefix)
 	return db.Put(append(privateRootPrefix, blockRoot[:]...), root[:])
 }
 

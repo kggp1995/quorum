@@ -111,7 +111,7 @@ type BlockChain struct {
 
 	badBlocks *lru.Cache // Bad block cache
 
-	privateStateCache state.Database // Private state database to reuse between imports (contains state cache)
+	privateStateCache state.Database   // Private state database to reuse between imports (contains state cache)
 	chainEvents       chan interface{} // Serialized chain insertion events
 }
 
@@ -126,18 +126,19 @@ func NewBlockChain(chainDb ethdb.Database, config *params.ChainConfig, engine co
 	badBlocks, _ := lru.New(badBlockLimit)
 
 	bc := &BlockChain{
-		config:       config,
-		chainDb:      chainDb,
-		stateCache:   state.NewDatabase(chainDb),
-		eventMux:     mux,
-		quit:         make(chan struct{}),
-		bodyCache:    bodyCache,
-		bodyRLPCache: bodyRLPCache,
-		blockCache:   blockCache,
-		futureBlocks: futureBlocks,
-		engine:       engine,
-		vmConfig:     vmConfig,
-		badBlocks:    badBlocks,
+		config:            config,
+		chainDb:           chainDb,
+		stateCache:        state.NewDatabase(chainDb),
+		privateStateCache: state.NewDatabase(chainDb),
+		eventMux:          mux,
+		quit:              make(chan struct{}),
+		bodyCache:         bodyCache,
+		bodyRLPCache:      bodyRLPCache,
+		blockCache:        blockCache,
+		futureBlocks:      futureBlocks,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		badBlocks:         badBlocks,
 
 		chainEvents: make(chan interface{}, 20), // Buffered for async publishing
 	}
@@ -1011,9 +1012,15 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		if _, err = state.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
 			return i, err
 		}
+
+		// Quorum
 		if _, err = privateState.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
 			return i, err
 		}
+		if err := WritePrivateStateRoot(bc.chainDb, block.Root(), privateStateRoot); err != nil {
+			return i, err
+		}
+		// /Quorum
 
 		// coalesce logs for later processing
 		coalescedLogs = append(coalescedLogs, logs...)
