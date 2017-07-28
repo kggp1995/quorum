@@ -699,7 +699,7 @@ func (srv *Server) setupConn(fd net.Conn, flags connFlag, dialDest *discover.Nod
 	//START - QUORUM Permissioning
 	currentNode := srv.NodeInfo().ID
 	cnodeName := srv.NodeInfo().Name
-	log.Info("Quorum permissioning",
+	log.Trace("Quorum permissioning",
 		"EnableNodePermission", srv.EnableNodePermission,
 		"DataDir", srv.DataDir,
 		"Current Node ID", currentNode,
@@ -709,7 +709,7 @@ func (srv *Server) setupConn(fd net.Conn, flags connFlag, dialDest *discover.Nod
 		"Connection String", c.id.String())
 
 	if srv.EnableNodePermission {
-		log.Info("Node Permissioning is Enabled.")
+		log.Trace("Node Permissioning is Enabled.")
 		node := c.id.String()
 		direction := "INCOMING"
 		if dialDest != nil {
@@ -722,7 +722,7 @@ func (srv *Server) setupConn(fd net.Conn, flags connFlag, dialDest *discover.Nod
 			return
 		}
 	} else {
-		log.Info("Node Permissioning is Disabled.")
+		log.Trace("Node Permissioning is Disabled.")
 	}
 
 	//END - QUORUM Permissioning

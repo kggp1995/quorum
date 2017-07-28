@@ -37,10 +37,10 @@ func TestDualStatePrivateToPublicCall(t *testing.T) {
 	callAddr := common.Address{1}
 
 	db, _ := ethdb.NewMemDatabase()
-	publicState, _ := state.New(common.Hash{}, db)
+	publicState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	publicState.SetCode(common.Address{2}, common.Hex2Bytes("600a6000526001601ff300"))
 
-	privateState, _ := state.New(common.Hash{}, db)
+	privateState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	privateState.SetCode(callAddr, common.Hex2Bytes("60016000600060006000730200000000000000000000000000000000000000620186a0f160005160005500"))
 
 	author := common.Address{}
@@ -66,10 +66,10 @@ func TestDualStatePublicToPrivateCall(t *testing.T) {
 	callAddr := common.Address{1}
 
 	db, _ := ethdb.NewMemDatabase()
-	privateState, _ := state.New(common.Hash{}, db)
+	privateState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	privateState.SetCode(common.Address{2}, common.Hex2Bytes("600a6000526001601ff300"))
 
-	publicState, _ := state.New(common.Hash{}, db)
+	publicState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	publicState.SetCode(callAddr, common.Hex2Bytes("60016000600060006000730200000000000000000000000000000000000000620186a0f160005160005500"))
 
 	author := common.Address{}
@@ -95,10 +95,10 @@ func TestDualStateReadOnly(t *testing.T) {
 	callAddr := common.Address{1}
 
 	db, _ := ethdb.NewMemDatabase()
-	publicState, _ := state.New(common.Hash{}, db)
+	publicState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	publicState.SetCode(common.Address{2}, common.Hex2Bytes("600a60005500"))
 
-	privateState, _ := state.New(common.Hash{}, db)
+	privateState, _ := state.New(common.Hash{}, state.NewDatabase(db))
 	privateState.SetCode(callAddr, common.Hex2Bytes("60016000600060006000730200000000000000000000000000000000000000620186a0f160005160005500"))
 
 	author := common.Address{}

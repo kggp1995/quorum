@@ -322,7 +322,7 @@ func (bc *BlockChain) GasLimit() *big.Int {
 	defer bc.mu.RUnlock()
 
 	if params.IsQuorum {
-		return common.Big0
+		return big.NewInt(0).Exp(common.Big2, common.Big256, nil) // HACK(joel) a very large number
 	} else {
 		return bc.currentBlock.GasLimit()
 	}

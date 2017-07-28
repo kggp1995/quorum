@@ -646,12 +646,10 @@ func FindCommonAncestor(db ethdb.Database, a, b *types.Header) *types.Header {
 
 func GetPrivateStateRoot(db ethdb.Database, blockRoot common.Hash) common.Hash {
 	root, _ := db.Get(append(privateRootPrefix, blockRoot[:]...))
-	println("GetPrivateStateRoot", "root", root, "blockRoot", fmt.Sprintf("%x", blockRoot), "privateRootPrefix", privateRootPrefix)
 	return common.BytesToHash(root)
 }
 
 func WritePrivateStateRoot(db ethdb.Database, blockRoot, root common.Hash) error {
-	println("WritePrivateStateRoot", "root", fmt.Sprintf("%x", root), "blockRoot", fmt.Sprintf("%x", blockRoot), "privateRootPrefix", privateRootPrefix)
 	return db.Put(append(privateRootPrefix, blockRoot[:]...), root[:])
 }
 
