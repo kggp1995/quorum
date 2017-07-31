@@ -34,8 +34,8 @@ import (
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/params"
-	whisper "github.com/ethereum/go-ethereum/whisper/whisperv5"
 	"github.com/ethereum/go-ethereum/raft"
+	whisper "github.com/ethereum/go-ethereum/whisper/whisperv5"
 	"github.com/naoina/toml"
 	"time"
 )
@@ -249,7 +249,7 @@ func RegisterRaftService(stack *node.Node, ctx *cli.Context, cfg gethConfig, eth
 
 		ethereum := <-ethChan
 
-		return raft.New(ctx, params.TestChainConfig, myId, joinExisting, blockTimeNanos, ethereum, peers, datadir)
+		return raft.New(ctx, ethereum.ChainConfig(), myId, joinExisting, blockTimeNanos, ethereum, peers, datadir)
 	}); err != nil {
 		utils.Fatalf("Failed to register the Raft service: %v", err)
 	}

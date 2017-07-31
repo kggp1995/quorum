@@ -39,7 +39,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/private"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -51,7 +50,7 @@ import (
 
 const (
 	defaultGas      = 90000
-	defaultGasPrice = 50 * params.Shannon
+	defaultGasPrice = 0
 	emptyHex        = "0x"
 )
 

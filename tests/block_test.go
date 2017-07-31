@@ -72,6 +72,8 @@ func TestBlockchain(t *testing.T) {
 		HomesteadBlock: big.NewInt(1000000),
 	})
 
+	params.IsQuorum = false
+	defer func() { params.IsQuorum = true }()
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		cfg := bt.findConfig(name)
 		if err := bt.checkFailure(t, name, test.Run(cfg)); err != nil {

@@ -100,6 +100,10 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 		privateState = publicState
 	}
 
+	if tx.GasPrice() != nil && tx.GasPrice().Cmp(common.Big0) > 0 {
+		return nil, nil, nil, ErrInvalidGasPrice
+	}
+
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, nil, nil, err

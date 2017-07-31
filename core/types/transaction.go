@@ -27,7 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	//"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -112,12 +112,12 @@ func newTransaction(nonce uint64, to *common.Address, amount, gasLimit, gasPrice
 	if gasLimit != nil {
 		d.GasLimit.Set(gasLimit)
 	}
-	if gasPrice != nil {
-		d.Price.Set(gasPrice)
-	}
-	if params.IsQuorum {
-		d.Price.Set(common.Big0)
-	}
+	//if gasPrice != nil {
+	//	d.Price.Set(gasPrice)
+	//}
+	//if params.IsQuorum {
+	//	d.Price.Set(common.Big0)
+	//}
 
 	return &Transaction{data: d}
 }

@@ -70,6 +70,8 @@ var (
 	// than some meaningful limit a user might use. This is not a consensus error
 	// making the transaction invalid, rather a DOS protection.
 	ErrOversizedData = errors.New("oversized data")
+
+	ErrInvalidGasPrice = errors.New("Gas price not 0")
 )
 
 var (
@@ -376,6 +378,9 @@ func (pool *TxPool) Pending() (map[common.Address]types.Transactions, error) {
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
+	if tx.GasPrice().Cmp(common.Big0) != 0 {
+		return ErrInvalidGasPrice
+	}
 	// Heuristic limit, reject transactions over 32KB to prevent DOS attacks
 	if tx.Size() > 32*1024 {
 		return ErrOversizedData
@@ -395,10 +400,10 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		return ErrInvalidSender
 	}
 	// Drop non-local transactions under our own minimal accepted gas price
-	local = local || pool.locals.contains(from) // account may be local even if the transaction arrived from the network
-	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
-		return ErrUnderpriced
-	}
+	//local = local || pool.locals.contains(from) // account may be local even if the transaction arrived from the network
+	//if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
+	//	return ErrUnderpriced
+	//}
 
 	// Ensure the transaction adheres to nonce ordering
 	currentState, _, err := pool.currentState()
@@ -416,10 +421,10 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			return ErrInsufficientFunds
 		}
 	}
-	intrGas := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
-	if tx.Gas().Cmp(intrGas) < 0 {
-		return ErrIntrinsicGas
-	}
+	//intrGas := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
+	//if tx.Gas().Cmp(intrGas) < 0 {
+	//	return ErrIntrinsicGas
+	//}
 	return nil
 }
 

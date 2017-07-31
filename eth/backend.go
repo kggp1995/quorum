@@ -36,7 +36,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/filters"
-	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
@@ -83,6 +82,11 @@ type Ethereum struct {
 	netRPCService *ethapi.PublicNetAPI
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+}
+
+// TODO(joel) this is a bit of a hack
+func (s *Ethereum) ChainConfig() *params.ChainConfig {
+	return s.chainConfig
 }
 
 func (s *Ethereum) AddLesServer(ls LesServer) {
@@ -170,11 +174,6 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	eth.miner.SetExtra(makeExtraData(config.ExtraData))
 
 	eth.ApiBackend = &EthApiBackend{eth, nil}
-	gpoParams := config.GPO
-	if gpoParams.Default == nil {
-		gpoParams.Default = config.GasPrice
-	}
-	eth.ApiBackend.gpo = gasprice.NewOracle(eth.ApiBackend, gpoParams)
 
 	return eth, nil
 }

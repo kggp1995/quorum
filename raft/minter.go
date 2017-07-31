@@ -347,7 +347,7 @@ func (env *work) commitTransactions(txes *types.TransactionsByPriceAndNonce, bc 
 			break
 		}
 
-		env.publicState.Prepare(tx.Hash(), common.Hash{}, 0)
+		env.publicState.Prepare(tx.Hash(), common.Hash{}, txCount)
 
 		publicReceipt, privateReceipt, err := env.commitTransaction(tx, bc, gp)
 		switch {
