@@ -126,21 +126,21 @@ func NewBlockChain(chainDb ethdb.Database, config *params.ChainConfig, engine co
 	badBlocks, _ := lru.New(badBlockLimit)
 
 	bc := &BlockChain{
-		config:            config,
-		chainDb:           chainDb,
-		stateCache:        state.NewDatabase(chainDb),
-		privateStateCache: state.NewDatabase(chainDb),
-		eventMux:          mux,
-		quit:              make(chan struct{}),
-		bodyCache:         bodyCache,
-		bodyRLPCache:      bodyRLPCache,
-		blockCache:        blockCache,
-		futureBlocks:      futureBlocks,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		badBlocks:         badBlocks,
+		config:       config,
+		chainDb:      chainDb,
+		stateCache:   state.NewDatabase(chainDb),
+		eventMux:     mux,
+		quit:         make(chan struct{}),
+		bodyCache:    bodyCache,
+		bodyRLPCache: bodyRLPCache,
+		blockCache:   blockCache,
+		futureBlocks: futureBlocks,
+		engine:       engine,
+		vmConfig:     vmConfig,
+		badBlocks:    badBlocks,
 
-		chainEvents: make(chan interface{}, 20), // Buffered for async publishing
+		privateStateCache: state.NewDatabase(chainDb),
+		chainEvents:       make(chan interface{}, 20), // Buffered for async publishing
 	}
 	bc.SetValidator(NewBlockValidator(config, bc, engine))
 	bc.SetProcessor(NewStateProcessor(config, bc, engine))
@@ -983,18 +983,20 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 			parent = chain[i-1]
 		}
 
-		// Quorum
-		privateStateRoot := GetPrivateStateRoot(bc.chainDb, parent.Root())
-		privateState, err := state.New(privateStateRoot, bc.privateStateCache)
-		if err != nil {
-			return i, err
-		}
-		// /Quorum
+		stateNew := state.New
 
 		state, err := state.New(parent.Root(), bc.stateCache)
 		if err != nil {
 			return i, err
 		}
+
+		// Quorum
+		privateStateRoot := GetPrivateStateRoot(bc.chainDb, parent.Root())
+		privateState, err := stateNew(privateStateRoot, bc.privateStateCache)
+		if err != nil {
+			return i, err
+		}
+		// /Quorum
 
 		// Process block using the parent state as reference point.
 		receipts, privateReceipts, logs, usedGas, err := bc.processor.Process(block, state, privateState, bc.vmConfig)
@@ -1002,6 +1004,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 			bc.reportBlock(block, receipts, err)
 			return i, err
 		}
+
 		// Validate the state using the default validator
 		err = bc.Validator().ValidateState(block, parent, state, receipts, usedGas)
 		if err != nil {
@@ -1014,7 +1017,8 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		}
 
 		// Quorum
-		if _, err = privateState.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
+		// Write private state changes to database
+		if privateStateRoot, err = privateState.CommitTo(bc.chainDb, bc.config.IsEIP158(block.Number())); err != nil {
 			return i, err
 		}
 		if err := WritePrivateStateRoot(bc.chainDb, block.Root(), privateStateRoot); err != nil {

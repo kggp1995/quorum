@@ -254,7 +254,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 		if !isPrivate {
 			publicState.SetNonce(sender.Address(), publicState.GetNonce(sender.Address())+1)
 		}
-		ret, st.gas, vmerr = evm.Call(sender, *msg.To(), data, st.gas, st.value)
+		ret, st.gas, vmerr = evm.Call(sender, *st.msg.To(), data, st.gas, st.value)
 	}
 	if vmerr != nil {
 		// The only possible consensus-error would be if there wasn't

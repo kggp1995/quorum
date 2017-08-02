@@ -56,6 +56,7 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
 func (p *StateProcessor) Process(block *types.Block, statedb, privateState *state.StateDB, cfg vm.Config) (types.Receipts, types.Receipts, []*types.Log, *big.Int, error) {
+
 	var (
 		receipts        types.Receipts
 		privateReceipts types.Receipts
@@ -71,6 +72,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb, privateState *stat
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
+		privateState.Prepare(tx.Hash(), block.Hash(), i)
+
 		receipt, privateReceipt, _, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, privateState, header, tx, totalUsedGas, cfg)
 		if err != nil {
 			return nil, nil, nil, totalUsedGas, err
@@ -95,9 +98,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb, privateState *stat
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common.Address, gp *GasPool, publicState, privateState *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *big.Int, cfg vm.Config) (*types.Receipt, *types.Receipt, *big.Int, error) {
+func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common.Address, gp *GasPool, statedb, privateState *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *big.Int, cfg vm.Config) (*types.Receipt, *types.Receipt, *big.Int, error) {
 	if !tx.IsPrivate() {
-		privateState = publicState
+		privateState = statedb
 	}
 
 	if tx.GasPrice() != nil && tx.GasPrice().Cmp(common.Big0) > 0 {
@@ -112,18 +115,25 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 	context := NewEVMContext(msg, header, bc, author)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(context, publicState, privateState, config, cfg)
+	vmenv := vm.NewEVM(context, statedb, privateState, config, cfg)
 	// Apply the transaction to the current state (included in the env)
 	_, gas, err := ApplyMessage(vmenv, msg, gp)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
+	// Update the state with pending changes
+	var root []byte
+	if config.IsMetropolis(header.Number) {
+		statedb.Finalise()
+	} else {
+		root = statedb.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
+	}
 	usedGas.Add(usedGas, gas)
+
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
 	// based on the eip phase, we're passing wether the root touch-delete accounts.
-	root := publicState.IntermediateRoot(config.IsEIP158(header.Number))
-	receipt := types.NewReceipt(root.Bytes(), usedGas)
+	receipt := types.NewReceipt(root, usedGas)
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = new(big.Int).Set(gas)
 	// if the transaction created a contract, store the creation address in the receipt.
@@ -132,13 +142,18 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 	}
 
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = publicState.GetLogs(tx.Hash())
+	receipt.Logs = statedb.GetLogs(tx.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
 	var privateReceipt *types.Receipt
 	if tx.IsPrivate() {
-		privateRoot := privateState.IntermediateRoot(config.IsEIP158(header.Number))
-		privateReceipt = types.NewReceipt(privateRoot.Bytes(), usedGas)
+		var privateRoot []byte
+		if config.IsMetropolis(header.Number) {
+			statedb.Finalise()
+		} else {
+			privateRoot = privateState.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
+		}
+		privateReceipt = types.NewReceipt(privateRoot, usedGas)
 		privateReceipt.TxHash = tx.Hash()
 		privateReceipt.GasUsed = new(big.Int).Set(gas)
 		if msg.To() == nil {

@@ -183,9 +183,10 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, eventMux *e
 
 	// Create the transaction pool with its initial settings
 	pool := &TxPool{
-		config:       config,
-		chainconfig:  chainconfig,
-		signer:       types.NewEIP155Signer(chainconfig.ChainId),
+		config:      config,
+		chainconfig: chainconfig,
+		//signer:       types.NewEIP155Signer(chainconfig.ChainId),
+		signer:       types.MakeSigner(chainconfig, new(big.Int)),
 		pending:      make(map[common.Address]*txList),
 		queue:        make(map[common.Address]*txList),
 		beats:        make(map[common.Address]time.Time),
@@ -715,6 +716,11 @@ func (pool *TxPool) removeTx(hash common.Hash) {
 // future queue to the set of pending transactions. During this process, all
 // invalidated transactions (low nonce, low balance) are deleted.
 func (pool *TxPool) promoteExecutables(state *state.StateDB, accounts []common.Address) {
+	// Init delayed since tx pool could have been started before any state sync
+	if pool.pendingState == nil {
+		pool.resetState()
+	}
+
 	gaslimit := pool.gasLimit()
 
 	// Gather all the accounts potentially needing updates

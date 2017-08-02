@@ -106,7 +106,7 @@ type EVM struct {
 	// Quorum additions:
 	publicState       PublicState
 	privateState      PrivateState
-	states            [1027]*state.StateDB
+	states            [1027]*state.StateDB // TODO(joel) we should be able to get away with 1024 or maybe 1025
 	currentStateDepth uint
 	readOnly          bool
 	readOnlyDepth     uint
